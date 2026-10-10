@@ -1,0 +1,805 @@
+<title>E1R Person Detection</title>
+<meta name="description" content="Setup, dataflow, detection pipeline, commands and debugging for the RoboSense E1R person detector (ROS 2 Humble).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky contents rail on the left, one reading column; diagrams and code scroll inside their own frames.
+   Look: a lab notebook for a sensor — cool slate neutrals, one teal "detection" accent, amber for the lidar/warnings. */
+:root {
+  --bg: #f4f6f7;
+  --surface: #ffffff;
+  --ink: #142027;
+  --muted: #56666e;
+  --rule: #d5dde0;
+  --accent: #0b8a73;
+  --accent-soft: #dff3ee;
+  --amber: #b0640f;
+  --amber-soft: #fbeedd;
+  --floor: #3c5fc0;
+  --code-bg: #0f1619;
+  --code-ink: #dbe5e8;
+  --code-dim: #7d8f96;
+  --code-key: #5fe0c2;
+  --display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1417; --surface: #151d21; --ink: #e2eaec; --muted: #93a3aa; --rule: #2a373d;
+    --accent: #3ad1b0; --accent-soft: #123129; --amber: #f0a24a; --amber-soft: #33240f; --floor: #7d9bf0;
+    --code-bg: #0a0f11;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1417; --surface: #151d21; --ink: #e2eaec; --muted: #93a3aa; --rule: #2a373d;
+  --accent: #3ad1b0; --accent-soft: #123129; --amber: #f0a24a; --amber-soft: #33240f; --floor: #7d9bf0;
+  --code-bg: #0a0f11;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15.5px; line-height: 1.6; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 0 80px;
+        display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; } nav.toc { display: none; } }
+
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; padding-top: 40px; font-size: 13.5px; }
+nav.toc .label { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: s; }
+nav.toc a { display: block; padding: 4px 10px; border-left: 2px solid var(--rule); color: var(--muted); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink); border-left-color: var(--accent); outline: none; }
+
+main { min-width: 0; }
+header.hero { padding-block: 48px 28px; border-bottom: 1px solid var(--rule); margin-bottom: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--display); font-stretch: 112%; font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; margin: 10px 0 14px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 17px; color: var(--muted); max-width: 66ch; margin: 0; }
+.specs { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 22px; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.specs b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+section { padding-top: 44px; scroll-margin-top: 16px; }
+h2 { font-family: var(--display); font-stretch: 112%; font-weight: 700; font-size: 26px; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; }
+h2 .n { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); margin-right: 10px; vertical-align: 4px; }
+h3 { font-family: var(--display); font-stretch: 112%; font-weight: 600; font-size: 18px; margin: 30px 0 6px; }
+p, li { max-width: 72ch; }
+.sub { color: var(--muted); margin-top: 0; }
+a { color: var(--accent); }
+code { font-family: var(--mono); font-size: .88em; background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; }
+strong { font-weight: 600; }
+
+/* code blocks */
+.code { position: relative; margin: 14px 0 18px; background: var(--code-bg); border-radius: var(--radius); }
+.code .cap { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 12px; border-bottom: 1px solid #23302f; font-family: var(--mono); font-size: 11.5px; color: var(--code-dim); letter-spacing: .04em; }
+.code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--code-ink); }
+.code pre .c { color: var(--code-dim); }
+.code pre .k { color: var(--code-key); }
+.copy { font: inherit; font-size: 11px; color: var(--code-dim); background: transparent; border: 1px solid #2c3a3e; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.copy:hover, .copy:focus-visible { color: var(--code-ink); border-color: var(--code-key); outline: none; }
+
+/* tables */
+.tbl { overflow-x: auto; margin: 14px 0 18px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+/* figures */
+figure { margin: 18px 0 22px; }
+.frame { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); padding: 14px; }
+.frame.dark { background: #0f1417; border-color: #0f1417; padding: 0; }
+.frame.dark img { display: block; width: 100%; min-width: 860px; }
+.frame.dark img.narrow { min-width: 0; max-width: 640px; margin: 0 auto; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; max-width: 80ch; }
+svg { display: block; max-width: 100%; height: auto; font-family: var(--body); }
+.frame svg { min-width: 760px; }
+.frame svg.sm { min-width: 520px; }
+
+/* svg tokens */
+.s-box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.4; }
+.s-ours { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.s-hw { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1.6; }
+.s-topic { fill: var(--bg); stroke: var(--muted); stroke-width: 1.1; stroke-dasharray: 4 3; }
+.s-line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.s-acc { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.s-amb { stroke: var(--amber); stroke-width: 1.8; fill: none; }
+.s-dec { fill: var(--surface); stroke: var(--amber); stroke-width: 1.6; }
+.t { fill: var(--ink); font-size: 13px; }
+.t-b { fill: var(--ink); font-size: 13.5px; font-weight: 600; }
+.t-m { fill: var(--muted); font-size: 11.5px; }
+.t-mono { fill: var(--ink); font-family: var(--mono); font-size: 11.5px; }
+.t-acc { fill: var(--accent); font-size: 11.5px; font-weight: 600; }
+.t-amb { fill: var(--amber); font-size: 11.5px; font-weight: 600; }
+.arrowhead { fill: var(--muted); }
+.arrowhead-acc { fill: var(--accent); }
+.arrowhead-amb { fill: var(--amber); }
+
+/* file tree */
+.tree { font-family: var(--mono); font-size: 13px; line-height: 1.5; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 14px 16px; overflow-x: auto; }
+.tree .row { display: grid; grid-template-columns: minmax(330px, max-content) minmax(260px, 1fr); gap: 16px; padding: 2px 0; }
+.tree .row:hover { background: var(--bg); }
+.tree .p { white-space: pre; color: var(--ink); }
+.tree .p .d { color: var(--muted); }
+.tree .p .ours { color: var(--accent); font-weight: 600; }
+.tree .what { font-family: var(--body); font-size: 13.5px; color: var(--muted); }
+.tree .tag { font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 3px; margin-left: 6px; border: 1px solid var(--rule); color: var(--muted); }
+
+/* callouts and steps */
+.note { border-left: 3px solid var(--amber); background: var(--amber-soft); padding: 10px 14px; border-radius: 0 var(--radius) var(--radius) 0; margin: 16px 0; max-width: 80ch; }
+.note.ok { border-left-color: var(--accent); background: var(--accent-soft); }
+.note p { margin: 0; }
+.note b { font-weight: 600; }
+ol.steps { padding-left: 0; list-style: none; counter-reset: st; display: grid; gap: 12px; margin: 16px 0; }
+ol.steps > li { counter-increment: st; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; max-width: none; }
+ol.steps > li::before { content: counter(st); font-family: var(--mono); font-size: 12px; font-weight: 600; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); display: grid; place-items: center; margin-top: 2px; }
+ol.steps > li > div > p:first-child { margin-top: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 16px 0; }
+.card { border: 1px solid var(--rule); background: var(--surface); border-radius: var(--radius); padding: 14px 16px; }
+.card h4 { margin: 0 0 4px; font-family: var(--display); font-stretch: 112%; font-size: 15px; }
+.card p { margin: 0; font-size: 14px; color: var(--muted); }
+.kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#hardware">Hardware &amp; network</a></li>
+    <li><a href="#install">Software install</a></li>
+    <li><a href="#dataflow">Dataflow</a></li>
+    <li><a href="#files">File structure</a></li>
+    <li><a href="#detection">How detection works</a></li>
+    <li><a href="#tracking">Tracking</a></li>
+    <li><a href="#config">Configuration</a></li>
+    <li><a href="#commands">Commands</a></li>
+    <li><a href="#debug">Debugging</a></li>
+    <li><a href="#performance">Performance</a></li>
+    <li><a href="#facts">Known pitfalls</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">RoboSense E1R · ROS 2 Humble · Ubuntu 22.04</div>
+  <h1>E1R Person Detection</h1>
+  <p class="lede">Streams the RoboSense E1R solid-state lidar into ROS 2, shows the point cloud in RViz, and detects people in the field of view with a geometric pipeline: floor fit, learned background, clustering, a human-size test and tracking. It runs on the CPU and needs no GPU.</p>
+  <div class="specs">
+    <span>frame rate <b>10 Hz</b></span>
+    <span>points/frame <b>~25,000</b></span>
+    <span>FOV <b>120° × 90°</b></span>
+    <span>detector <b>~23 ms/frame</b></span>
+    <span>CPU <b>~0.3 core</b></span>
+    <span>RAM <b>~215 MB</b></span>
+  </div>
+</header>
+
+<!-- ============================================================ OVERVIEW -->
+<section id="overview">
+  <h2><span class="n">01</span>Overview</h2>
+  <p>The project has two parts. The official RoboSense driver (<code>rslidar_sdk</code>) turns the lidar's UDP packets into a <code>PointCloud2</code> on <code>/rslidar_points</code>. Our package <code>e1r_person_detection</code> subscribes to that cloud, finds people and publishes boxes for RViz, a list of positions, and a simple <code>true/false</code> "someone is here" flag.</p>
+  <div class="grid2">
+    <div class="card"><h4>Step 1: view</h4><p><code>e1r_view.launch.py</code> starts the driver and RViz. Use it to check the lidar works and is oriented correctly.</p></div>
+    <div class="card"><h4>Step 2: detect</h4><p><code>e1r_person_detection.launch.py</code> adds the detector. <code>fake:=true</code> swaps in a simulated lidar so you can test without hardware.</p></div>
+  </div>
+  <div class="note"><p><b>Assumption:</b> the lidar is <b>static</b>. The detector learns the empty room during the first <b>90 frames (~9 s)</b> and ignores it afterwards. Keep the view clear while it starts. On a moving robot, set <code>use_background: false</code>.</p></div>
+</section>
+
+<!-- ============================================================ HARDWARE -->
+<section id="hardware">
+  <h2><span class="n">02</span>Hardware &amp; network setup</h2>
+  <p class="sub">The lidar body speaks automotive ethernet (1000BASE-T1). The interface box converts it to a normal RJ45 port, and that port works <strong>only at gigabit speed</strong>.</p>
+
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 860 250" role="img" aria-label="Wiring: 9 to 16 V supply into the interface box, box to lidar, box RJ45 gigabit to the PC ethernet port">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-acc"/></marker>
+      </defs>
+      <!-- supply -->
+      <rect x="20" y="150" width="150" height="62" rx="6" class="s-box"/>
+      <text x="95" y="177" text-anchor="middle" class="t-b">DC supply</text>
+      <text x="95" y="196" text-anchor="middle" class="t-m">9–16 V, 5.5×2.1 plug</text>
+      <!-- lidar -->
+      <rect x="20" y="28" width="150" height="72" rx="6" class="s-hw"/>
+      <text x="95" y="56" text-anchor="middle" class="t-b">E1R lidar</text>
+      <text x="95" y="75" text-anchor="middle" class="t-m">192.168.1.200</text>
+      <text x="95" y="91" text-anchor="middle" class="t-m">wakes on KL15 = 9–16 V</text>
+      <!-- box -->
+      <rect x="290" y="70" width="190" height="110" rx="6" class="s-hw"/>
+      <text x="385" y="104" text-anchor="middle" class="t-b">Interface box</text>
+      <text x="385" y="124" text-anchor="middle" class="t-m">green LED steady = power OK</text>
+      <text x="385" y="142" text-anchor="middle" class="t-m">1000BASE-T1 ⇄ 1000BASE-T</text>
+      <text x="385" y="160" text-anchor="middle" class="t-amb">RJ45: gigabit only</text>
+      <!-- PC -->
+      <rect x="620" y="60" width="220" height="130" rx="6" class="s-ours"/>
+      <text x="730" y="92" text-anchor="middle" class="t-b">Host PC</text>
+      <text x="730" y="112" text-anchor="middle" class="t-mono">enp2s0  192.168.1.102/16</text>
+      <text x="730" y="132" text-anchor="middle" class="t-m">speed must read 1000</text>
+      <text x="730" y="152" text-anchor="middle" class="t-m">UDP 6699 MSOP · 7788 DIFOP</text>
+      <text x="730" y="172" text-anchor="middle" class="t-m">ROS 2 Humble</text>
+      <!-- links -->
+      <path d="M170 64 H230 V105 H288" class="s-amb" marker-end="url(#ah)"/>
+      <text x="236" y="58" class="t-m">T1 cable</text>
+      <path d="M170 181 H230 V150 H288" class="s-line" marker-end="url(#ah)"/>
+      <text x="236" y="198" class="t-m">power</text>
+      <path d="M480 125 H618" class="s-acc" marker-end="url(#aha)"/>
+      <text x="549" y="115" text-anchor="middle" class="t-acc">Cat5e/6, 4 pairs</text>
+      <text x="549" y="145" text-anchor="middle" class="t-m">~2,900 pkt/s, 1200 B</text>
+    </svg>
+    </div>
+    <figcaption>Factory network settings from the E1R User Guide. The lidar sends <em>unicast</em> to 192.168.1.102, so the PC must own that address before any point data arrives.</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><div><p><strong>Power and wire it.</strong> Supply 9–16 V into the interface box (green LED steady), plug in the lidar, and connect the box's RJ45 to a <strong>gigabit</strong> ethernet port. A link that only reaches 100 Mbps (bad or 2-pair cable, slow USB adapter) carries no data at all.</p></div></li>
+    <li><div><p><strong>Find the interface and check the link speed.</strong></p>
+      <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>ip -br link                              <span class="c"># e.g. enp2s0</span>
+cat /sys/class/net/enp2s0/speed          <span class="c"># must print 1000</span></pre></div></div></li>
+    <li><div><p><strong>Give the PC the lidar's host address.</strong> This creates a NetworkManager profile <code>robosense-e1r</code> that comes up whenever the cable is plugged in.</p>
+      <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>scripts/setup_network.sh enp2s0          <span class="c"># 192.168.1.102/16, profile "robosense-e1r"</span>
+ping -c 3 192.168.1.200</pre></div></div></li>
+    <li><div><p><strong>Confirm packets arrive.</strong> No root needed.</p>
+      <div class="code"><div class="cap"><span>bash · expected output</span><button class="copy" type="button">copy</button></div><pre>python3 scripts/check_lidar.py enp2s0
+<span class="c">#   enp2s0                  8794
+#   MSOP  (point data) port 6699: 2880 pkt/s from 192.168.1.200, sizes [1200]
+#   DIFOP (device info) port 7788: 50 pkt/s from 192.168.1.200, sizes [256]
+# OK - lidar data is arriving.</span></pre></div></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ INSTALL -->
+<section id="install">
+  <h2><span class="n">03</span>Software install</h2>
+  <p class="sub">Ubuntu 22.04 with ROS 2 Humble already installed.</p>
+  <div class="code"><div class="cap"><span>bash · first-time setup</span><button class="copy" type="button">copy</button></div><pre>git clone --recursive https://github.com/satwikio/robosense_e1r_person_detection.git
+cd robosense_e1r_person_detection
+<span class="c"># forgot --recursive?  git submodule update --init --recursive</span>
+
+sudo apt install libpcap-dev libyaml-cpp-dev            <span class="c"># the driver needs pcap.h</span>
+pip install --user "numpy&lt;2" "scipy&gt;=1.10,&lt;1.14" "scikit-learn&gt;=1.3,&lt;1.6"
+<span class="c"># (or: sudo apt install python3-sklearn python3-scipy, if numpy comes from apt too)</span>
+
+cd ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
+
+cd src/e1r_person_detection &amp;&amp; python3 -m pytest -q test   <span class="c"># 7 passed, no ROS or lidar needed</span></pre></div>
+  <div class="note"><p><b>Keep NumPy below 2.</b> ROS 2 Humble's Python packages are built against NumPy 1.x. Mixing a pip NumPy 1.26 with apt's SciPy 1.8 prints version warnings, which is why SciPy and scikit-learn are installed with pip as well.</p></div>
+  <div class="note"><p><b>Edits to <code>config/*.yaml</code> need a rebuild.</b> The launch files read the copy in <code>install/</code>. After changing <code>src/.../detector.yaml</code>, run <code>colcon build --packages-select e1r_person_detection</code> (or build once with <code>--symlink-install</code>).</p></div>
+</section>
+
+<!-- ============================================================ DATAFLOW -->
+<section id="dataflow">
+  <h2><span class="n">04</span>Dataflow</h2>
+  <p class="sub">Processes (solid), ROS topics (dashed) and who consumes them. Everything after the driver is our code.</p>
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 470" role="img" aria-label="Dataflow from the lidar through the driver and detector to RViz and other consumers">
+      <defs>
+        <marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        <marker id="d2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-acc"/></marker>
+        <marker id="d3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-amb"/></marker>
+      </defs>
+      <!-- column labels -->
+      <text x="20" y="22" class="t-m">SENSOR</text>
+      <text x="210" y="22" class="t-m">DRIVER</text>
+      <text x="400" y="22" class="t-m">TOPIC</text>
+      <text x="560" y="22" class="t-m">DETECTOR</text>
+      <text x="760" y="22" class="t-m">CONSUMERS</text>
+
+      <!-- lidar -->
+      <rect x="20" y="120" width="150" height="80" rx="6" class="s-hw"/>
+      <text x="95" y="152" text-anchor="middle" class="t-b">E1R lidar</text>
+      <text x="95" y="172" text-anchor="middle" class="t-m">10 Hz · 120°×90°</text>
+      <!-- fake -->
+      <rect x="20" y="250" width="150" height="80" rx="6" class="s-box"/>
+      <text x="95" y="280" text-anchor="middle" class="t-b">fake_lidar</text>
+      <text x="95" y="299" text-anchor="middle" class="t-m">synthetic scene</text>
+      <text x="95" y="316" text-anchor="middle" class="t-m">launch fake:=true</text>
+
+      <!-- driver -->
+      <rect x="210" y="110" width="150" height="100" rx="6" class="s-box"/>
+      <text x="285" y="142" text-anchor="middle" class="t-b">rslidar_sdk_node</text>
+      <text x="285" y="161" text-anchor="middle" class="t-m">lidar_type RSE1</text>
+      <text x="285" y="178" text-anchor="middle" class="t-m">rslidar_e1r.yaml</text>
+      <text x="285" y="195" text-anchor="middle" class="t-m">submodule, unmodified</text>
+      <path d="M170 152 H208" class="s-amb" marker-end="url(#d3)"/>
+      <text x="190" y="100" text-anchor="middle" class="t-amb">UDP 6699 / 7788</text>
+
+      <!-- topic cloud -->
+      <rect x="390" y="128" width="150" height="64" rx="6" class="s-topic"/>
+      <text x="465" y="155" text-anchor="middle" class="t-mono">/rslidar_points</text>
+      <text x="465" y="174" text-anchor="middle" class="t-m">PointCloud2 · ~0.5 MB</text>
+      <path d="M360 160 H388" class="s-line" marker-end="url(#d1)"/>
+      <path d="M170 290 H430 V194" class="s-line" stroke-dasharray="5 4" marker-end="url(#d1)"/>
+      <text x="200" y="282" class="t-m">same topic, frame "rslidar"</text>
+
+      <!-- detector -->
+      <rect x="570" y="80" width="160" height="160" rx="6" class="s-ours"/>
+      <text x="650" y="110" text-anchor="middle" class="t-b">person_detector</text>
+      <text x="650" y="132" text-anchor="middle" class="t-m">detector.py</text>
+      <text x="650" y="149" text-anchor="middle" class="t-m">floor · background</text>
+      <text x="650" y="166" text-anchor="middle" class="t-m">DBSCAN · shape test</text>
+      <text x="650" y="186" text-anchor="middle" class="t-m">tracker.py</text>
+      <text x="650" y="206" text-anchor="middle" class="t-m">detector.yaml</text>
+      <path d="M540 160 H568" class="s-acc" marker-end="url(#d2)"/>
+      <text x="554" y="214" text-anchor="middle" class="t-acc">RELIABLE</text>
+      <text x="554" y="228" text-anchor="middle" class="t-acc">QoS</text>
+
+      <!-- outputs -->
+      <g>
+        <rect x="760" y="40" width="130" height="40" rx="6" class="s-topic"/>
+        <text x="825" y="57" text-anchor="middle" class="t-mono">~/markers</text>
+        <text x="825" y="72" text-anchor="middle" class="t-m">boxes + labels</text>
+        <rect x="760" y="92" width="130" height="40" rx="6" class="s-topic"/>
+        <text x="825" y="109" text-anchor="middle" class="t-mono">~/persons</text>
+        <text x="825" y="124" text-anchor="middle" class="t-m">PoseArray</text>
+        <rect x="760" y="144" width="130" height="40" rx="6" class="s-topic"/>
+        <text x="825" y="161" text-anchor="middle" class="t-mono">~/person_present</text>
+        <text x="825" y="176" text-anchor="middle" class="t-m">Bool, every frame</text>
+        <rect x="760" y="196" width="130" height="40" rx="6" class="s-topic"/>
+        <text x="825" y="213" text-anchor="middle" class="t-mono">~/foreground</text>
+        <text x="825" y="228" text-anchor="middle" class="t-m">debug cloud</text>
+        <path d="M730 110 C745 110 745 60 758 60" class="s-line" marker-end="url(#d1)"/>
+        <path d="M730 130 C745 130 745 112 758 112" class="s-line" marker-end="url(#d1)"/>
+        <path d="M730 160 H758" class="s-line" marker-end="url(#d1)"/>
+        <path d="M730 190 C745 190 745 216 758 216" class="s-line" marker-end="url(#d1)"/>
+      </g>
+
+      <!-- service -->
+      <rect x="570" y="290" width="160" height="56" rx="6" class="s-topic"/>
+      <text x="650" y="314" text-anchor="middle" class="t-mono">~/relearn_background</text>
+      <text x="650" y="332" text-anchor="middle" class="t-m">std_srvs/Trigger service</text>
+      <path d="M650 288 V242" class="s-line" marker-end="url(#d1)"/>
+
+      <!-- consumers -->
+      <rect x="390" y="380" width="250" height="64" rx="6" class="s-box"/>
+      <text x="515" y="407" text-anchor="middle" class="t-b">RViz (e1r.rviz)</text>
+      <text x="515" y="426" text-anchor="middle" class="t-m">points + foreground + person boxes</text>
+      <path d="M500 194 V378" class="s-line" marker-end="url(#d1)"/>
+      <path d="M825 236 V378" class="s-line" marker-end="url(#d1)"/>
+      <path d="M760 226 H745 V356 H600 V378" class="s-line" marker-end="url(#d1)"/>
+      <rect x="680" y="380" width="200" height="64" rx="6" class="s-box"/>
+      <text x="780" y="407" text-anchor="middle" class="t-b">Your application</text>
+      <text x="780" y="426" text-anchor="middle" class="t-m">subscribe to persons / present</text>
+    </svg>
+    </div>
+    <figcaption><code>~/</code> expands to <code>/person_detector/</code>. All outputs are in the lidar frame <code>rslidar</code>; there is no TF tree to set up. <code>~/foreground</code> is only published while something subscribes to it.</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Topic / service</th><th>Type</th><th>Content</th></tr></thead>
+    <tbody>
+      <tr><td><code>/rslidar_points</code></td><td>sensor_msgs/PointCloud2</td><td>Raw cloud from the driver: x, y, z, intensity. ~25k points at 10 Hz.</td></tr>
+      <tr><td><code>/person_detector/person_present</code></td><td>std_msgs/Bool</td><td><code>true</code> while at least one confirmed person is in view. Published every frame.</td></tr>
+      <tr><td><code>/person_detector/persons</code></td><td>geometry_msgs/PoseArray</td><td>Box centre and orientation of every confirmed person.</td></tr>
+      <tr><td><code>/person_detector/markers</code></td><td>visualization_msgs/MarkerArray</td><td>Green boxes and "person N  X m" labels; orange rejected clusters when <code>show_rejected: true</code>.</td></tr>
+      <tr><td><code>/person_detector/foreground</code></td><td>sensor_msgs/PointCloud2</td><td>Points left after removing floor and background. The quickest way to see what the detector "sees".</td></tr>
+      <tr><td><code>/person_detector/relearn_background</code></td><td>std_srvs/Trigger</td><td>Forget the background and learn it again (clear the view first).</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ FILES -->
+<section id="files">
+  <h2><span class="n">05</span>File structure</h2>
+  <p class="sub">Teal entries are this project's code. The two RoboSense packages are git submodules and are never edited.</p>
+  <div class="tree" role="list">
+    <div class="row" role="listitem"><span class="p">robosense_e1r_person_detection/</span><span class="what">repository root</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">├─</span> README.md</span><span class="what">short user guide</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">├─</span> CLAUDE.md</span><span class="what">project notes: layout, status, hard-won facts</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">├─</span> docs/index.html</span><span class="what">this page (figures in <code>docs/img/</code>)</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">├─</span> scripts/</span><span class="what"></span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">│  ├─</span> <span class="ours">setup_network.sh</span></span><span class="what">sets 192.168.1.102/16 on an interface via NetworkManager</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">│  └─</span> <span class="ours">check_lidar.py</span></span><span class="what">no-root check: NIC rx counters + UDP 6699/7788 rates and source IP</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">└─</span> ros2_ws/src/</span><span class="what">colcon workspace</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">   ├─</span> rslidar_sdk/<span class="tag">submodule</span></span><span class="what">official RoboSense driver, publishes <code>/rslidar_points</code></span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">   ├─</span> rslidar_msg/<span class="tag">submodule</span></span><span class="what">driver's packet message definitions</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">   └─</span> <span class="ours">e1r_person_detection/</span></span><span class="what">our ament_python package</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> config/<span class="ours">rslidar_e1r.yaml</span></span><span class="what">driver config: <code>lidar_type: RSE1</code>, ports, 30 m range, frame <code>rslidar</code></span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> config/<span class="ours">detector.yaml</span></span><span class="what">detector tuning: mounting, ranges, background, human envelope, tracking</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> launch/<span class="ours">e1r_view.launch.py</span></span><span class="what">step 1: driver + RViz</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> launch/<span class="ours">e1r_person_detection.launch.py</span></span><span class="what">step 2: driver (or fake) + detector + RViz; args <code>fake</code>, <code>rviz</code>, <code>lidar_config</code>, <code>detector_config</code></span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> rviz/<span class="ours">e1r.rviz</span></span><span class="what">RViz layout; all displays set to Reliable QoS</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> e1r_person_detection/</span><span class="what">Python sources</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      │  ├─</span> <span class="ours">detector.py</span></span><span class="what">the algorithm, pure numpy/sklearn, no ROS. <code>DetectorParams</code> fields become ROS parameters automatically</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      │  ├─</span> <span class="ours">tracker.py</span></span><span class="what">constant-velocity tracks, Hungarian matching on the floor plane</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      │  ├─</span> <span class="ours">person_detector_node.py</span></span><span class="what">ROS wrapper: subscribe, run detector + tracker, publish topics, service</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      │  ├─</span> <span class="ours">synthetic.py</span></span><span class="what">ray-cast fake E1R scene (floor, walls, pole, table, walking person)</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      │  └─</span> <span class="ours">fake_lidar_node.py</span></span><span class="what">publishes the synthetic scene on <code>/rslidar_points</code></span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      ├─</span> test/<span class="ours">test_detector.py</span></span><span class="what">7 pytest cases on synthetic data (no ROS needed)</span></div>
+    <div class="row" role="listitem"><span class="p"><span class="d">      └─</span> package.xml, setup.py</span><span class="what">package metadata; executables <code>person_detector</code>, <code>fake_lidar</code></span></div>
+  </div>
+</section>
+
+<!-- ============================================================ DETECTION -->
+<section id="detection">
+  <h2><span class="n">06</span>How detection works</h2>
+  <p class="sub">Every frame goes through the same pipeline in <code>detector.py</code>. No machine learning: each step is geometry with a few tunable numbers.</p>
+
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 560" role="img" aria-label="Per-frame flow chart of the detection pipeline">
+      <defs>
+        <marker id="f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        <marker id="f2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-acc"/></marker>
+      </defs>
+      <!-- main column x=40..320 -->
+      <rect x="40" y="16" width="280" height="44" rx="22" class="s-hw"/>
+      <text x="180" y="43" text-anchor="middle" class="t-b">PointCloud2 frame (~25k points)</text>
+      <path d="M180 60 V78" class="s-line" marker-end="url(#f1)"/>
+
+      <rect x="40" y="80" width="280" height="52" rx="6" class="s-box"/>
+      <text x="180" y="102" text-anchor="middle" class="t-b">1 · Crop + voxel downsample</text>
+      <text x="180" y="121" text-anchor="middle" class="t-m">0.3–20 m range, 6 cm voxels → ~18k pts</text>
+      <path d="M180 132 V150" class="s-line" marker-end="url(#f1)"/>
+
+      <rect x="40" y="152" width="280" height="64" rx="6" class="s-box"/>
+      <text x="180" y="174" text-anchor="middle" class="t-b">2 · Floor plane (RANSAC)</text>
+      <text x="180" y="193" text-anchor="middle" class="t-m">seed from lowest 15 % of points along "up"</text>
+      <text x="180" y="208" text-anchor="middle" class="t-m">normal within 35° of mount up · refit by SVD</text>
+      <path d="M180 216 V234" class="s-line" marker-end="url(#f1)"/>
+
+      <rect x="40" y="236" width="280" height="52" rx="6" class="s-box"/>
+      <text x="180" y="258" text-anchor="middle" class="t-b">3 · Rotate into ground frame</text>
+      <text x="180" y="277" text-anchor="middle" class="t-m">z = height above floor · drop z &lt; 0.12 m</text>
+      <path d="M180 288 V306" class="s-line" marker-end="url(#f1)"/>
+
+      <!-- decision -->
+      <polygon points="180,308 300,348 180,388 60,348" class="s-dec"/>
+      <text x="180" y="344" text-anchor="middle" class="t-b">Still learning?</text>
+      <text x="180" y="362" text-anchor="middle" class="t-m">frame &lt; 90</text>
+
+      <!-- learning branch -->
+      <path d="M300 348 H448" class="s-line" marker-end="url(#f1)"/>
+      <text x="370" y="340" text-anchor="middle" class="t-amb">yes</text>
+      <rect x="450" y="312" width="280" height="72" rx="6" class="s-box"/>
+      <text x="590" y="334" text-anchor="middle" class="t-b">Count occupied 20 cm voxels</text>
+      <text x="590" y="353" text-anchor="middle" class="t-m">at frame 90: voxel = background if seen</text>
+      <text x="590" y="370" text-anchor="middle" class="t-m">in ≥ 60 % of frames; dilate by 1 voxel</text>
+      <path d="M730 348 H780" class="s-line" marker-end="url(#f1)"/>
+      <rect x="782" y="326" width="100" height="44" rx="22" class="s-box"/>
+      <text x="832" y="346" text-anchor="middle" class="t-m">return,</text>
+      <text x="832" y="361" text-anchor="middle" class="t-m">no detections</text>
+
+      <!-- no branch -->
+      <path d="M180 388 V412" class="s-line" marker-end="url(#f1)"/>
+      <text x="196" y="404" class="t-acc">no</text>
+      <rect x="40" y="414" width="280" height="52" rx="6" class="s-box"/>
+      <text x="180" y="436" text-anchor="middle" class="t-b">4 · Remove background voxels</text>
+      <text x="180" y="455" text-anchor="middle" class="t-m">what remains = foreground (~50 pts)</text>
+      <path d="M320 440 H448" class="s-line" marker-end="url(#f1)"/>
+
+      <rect x="450" y="414" width="280" height="52" rx="6" class="s-box"/>
+      <text x="590" y="436" text-anchor="middle" class="t-b">5 · DBSCAN clustering</text>
+      <text x="590" y="455" text-anchor="middle" class="t-m">eps 0.30 m · ≥ 12 points per cluster</text>
+      <path d="M590 466 V484" class="s-line" marker-end="url(#f1)"/>
+
+      <rect x="450" y="486" width="280" height="64" rx="6" class="s-ours"/>
+      <text x="590" y="507" text-anchor="middle" class="t-b">6 · Human-envelope test per cluster</text>
+      <text x="590" y="525" text-anchor="middle" class="t-m">top 1.0–2.2 m · tall ≥ 0.7 m · bottom ≤ 0.7 m</text>
+      <text x="590" y="541" text-anchor="middle" class="t-m">footprint 0.15–1.2 × ≤ 0.9 m</text>
+      <path d="M730 518 H780" class="s-acc" marker-end="url(#f2)"/>
+      <rect x="782" y="490" width="100" height="56" rx="6" class="s-ours"/>
+      <text x="832" y="513" text-anchor="middle" class="t-b">7 · Tracker</text>
+      <text x="832" y="531" text-anchor="middle" class="t-m">→ topics</text>
+
+      <!-- fallback note -->
+      <rect x="450" y="160" width="280" height="56" rx="6" class="s-topic"/>
+      <text x="590" y="183" text-anchor="middle" class="t-m">no floor found → plane at</text>
+      <text x="590" y="200" text-anchor="middle" class="t-m">fallback_sensor_height (1.0 m)</text>
+      <path d="M320 186 H448" class="s-line" stroke-dasharray="3 3"/>
+      <rect x="450" y="236" width="280" height="56" rx="6" class="s-topic"/>
+      <text x="590" y="259" text-anchor="middle" class="t-m">after learning the floor is frozen</text>
+      <text x="590" y="276" text-anchor="middle" class="t-m">(fix_ground_after_learning)</text>
+      <path d="M320 262 H448" class="s-line" stroke-dasharray="3 3"/>
+    </svg>
+    </div>
+    <figcaption>Per-frame flow. During the first <code>background_learn_frames</code> frames the detector only learns; nothing is clustered or reported.</figcaption>
+  </figure>
+
+  <h3>The same steps on a real frame</h3>
+  <p>Frame 152 of a 20 s recording from the bench setup: lidar upright, 1.20 m above the floor, one person walking about 9.6 m away. Top-down view, lidar at the orange triangle looking along +x.</p>
+  <figure>
+    <div class="frame dark"><img src="img/pipeline_topdown.png" alt="Four top-down panels: raw cloud coloured by height, floor removed in blue, background greyed out leaving a few teal foreground points, and one cluster boxed as a person at 9.6 metres" width="1445" height="442"></div>
+    <figcaption>Of 25,268 points, 18,416 survive the voxel filter, 2,602 are floor and 15,764 are learned background. Only 50 foreground points remain, and one cluster of 38 passes the human test. The scattered single teal points are noise that never forms a 12-point cluster.</figcaption>
+  </figure>
+
+  <h3>The human-envelope test</h3>
+  <p>Each cluster is measured in the ground frame and must pass every check. A failed check is listed in the rejection reason (visible with <code>show_rejected: true</code>).</p>
+  <figure>
+    <div class="frame dark"><img class="narrow" src="img/person_sideview.png" alt="Side view of the detected person: 38 points from 0.57 to 1.63 metres above the floor inside a box, with dashed lines for min_height, max_height and max_bottom" width="637" height="425"></div>
+    <figcaption>The same person from the side. The top of the head (1.63 m) falls between <code>min_height</code> and <code>max_height</code>, and the lowest point (0.57 m) is below <code>max_bottom</code>, so the cluster "touches" the floor. At 9.6 m the lidar's rays are sparse near the feet, which is why <code>max_bottom</code> is generous.</figcaption>
+  </figure>
+  <div class="tbl"><table>
+    <thead><tr><th>Check</th><th>Parameter</th><th>Default</th><th>Rejects</th></tr></thead>
+    <tbody>
+      <tr><td>Top of cluster</td><td><code>min_height</code> … <code>max_height</code></td><td class="num">1.0 – 2.2 m</td><td>low furniture, pets, shelves taller than a person</td></tr>
+      <tr><td>Vertical extent</td><td><code>min_vertical_extent</code></td><td class="num">≥ 0.7 m</td><td>floating objects, table tops</td></tr>
+      <tr><td>Lowest point</td><td><code>max_bottom</code></td><td class="num">≤ 0.7 m</td><td>things hanging from the ceiling, wall-mounted items</td></tr>
+      <tr><td>Footprint length</td><td><code>min_footprint_major</code> … <code>max_footprint_major</code></td><td class="num">0.15 – 1.2 m</td><td>thin poles, cars, long walls</td></tr>
+      <tr><td>Footprint width</td><td><code>max_footprint_minor</code></td><td class="num">≤ 0.9 m</td><td>wide objects</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Why the background model matters</h3>
+  <p>Shape alone cannot tell a person from a coat stand or a pole. The background model removes everything that was there during learning: a 0.2 m voxel is background if it was occupied in at least 60 % of the learning frames. People walking during learning do not stay in one voxel long enough to be absorbed. <strong>Someone standing still</strong> during learning does become background; call <code>relearn_background</code> once they leave.</p>
+</section>
+
+<!-- ============================================================ TRACKING -->
+<section id="tracking">
+  <h2><span class="n">07</span>Tracking</h2>
+  <p class="sub"><code>tracker.py</code> turns per-frame detections into stable, numbered people and filters one-frame false positives.</p>
+  <figure>
+    <div class="frame">
+    <svg class="sm" viewBox="0 0 820 200" role="img" aria-label="Track life cycle: new, confirmed after 3 hits, coasting through up to 8 missed frames, deleted after 15 missed frames">
+      <defs><marker id="t1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs>
+      <rect x="20" y="70" width="150" height="60" rx="30" class="s-box"/>
+      <text x="95" y="96" text-anchor="middle" class="t-b">Tentative</text>
+      <text x="95" y="114" text-anchor="middle" class="t-m">not reported</text>
+      <rect x="240" y="70" width="150" height="60" rx="30" class="s-ours"/>
+      <text x="315" y="96" text-anchor="middle" class="t-b">Confirmed</text>
+      <text x="315" y="114" text-anchor="middle" class="t-m">reported</text>
+      <rect x="460" y="70" width="150" height="60" rx="30" class="s-ours"/>
+      <text x="535" y="96" text-anchor="middle" class="t-b">Coasting</text>
+      <text x="535" y="114" text-anchor="middle" class="t-m">reported ≤ 8 misses</text>
+      <rect x="680" y="70" width="120" height="60" rx="30" class="s-box"/>
+      <text x="740" y="104" text-anchor="middle" class="t-b">Deleted</text>
+      <path d="M170 100 H238" class="s-line" marker-end="url(#t1)"/>
+      <text x="204" y="90" text-anchor="middle" class="t-m">3 hits</text>
+      <path d="M390 92 H458" class="s-line" marker-end="url(#t1)"/>
+      <text x="424" y="82" text-anchor="middle" class="t-m">missed</text>
+      <path d="M458 110 H392" class="s-line" marker-end="url(#t1)"/>
+      <text x="424" y="126" text-anchor="middle" class="t-m">seen again</text>
+      <path d="M610 100 H678" class="s-line" marker-end="url(#t1)"/>
+      <text x="644" y="90" text-anchor="middle" class="t-m">&gt; 15 misses</text>
+      <text x="535" y="160" text-anchor="middle" class="t-m">misses 9–15: kept silently, can still be re-matched</text>
+      <path d="M95 70 V40 H740 V68" class="s-line" stroke-dasharray="4 3"/>
+      <text x="417" y="32" text-anchor="middle" class="t-m">never confirmed and not seen for 15 frames</text>
+    </svg>
+    </div>
+  </figure>
+  <ul>
+    <li><strong>Association:</strong> each track predicts its position with constant velocity; detections are matched by the Hungarian algorithm on floor-plane distance, rejecting matches beyond <code>track_gate</code> (1.0 m).</li>
+    <li><strong>Confirm:</strong> a new person is reported after <code>confirm_frames: 3</code> hits (0.3 s), which suppresses single-frame noise.</li>
+    <li><strong>Coast:</strong> a confirmed person stays reported through <code>coast_frames: 8</code> missed frames (0.8 s). This bridges a person passing behind a pole or other background object, which costs them points for about 0.7 s.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ CONFIG -->
+<section id="config">
+  <h2><span class="n">08</span>Configuration</h2>
+  <p class="sub">All in <code>config/detector.yaml</code>. Any field of <code>DetectorParams</code> in <code>detector.py</code> can be set there, even if it is not listed in the file yet. Rebuild after editing.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Parameter</th><th>Current</th><th>What it does / when to change</th></tr></thead>
+    <tbody>
+      <tr><td><code>mount_roll_deg</code>, <code>mount_pitch_deg</code></td><td class="num">0, 0</td><td>Which way is "up" for the floor search. Upside-down mount: <code>roll 180</code>. Wrong value → the ceiling is taken as the floor.</td></tr>
+      <tr><td><code>max_range</code></td><td class="num">20 m</td><td>Ignore points further away. Lower it to cut false positives at long range.</td></tr>
+      <tr><td><code>voxel_size</code></td><td class="num">0.06 m</td><td>Downsampling grid. Larger = faster, fewer points per person.</td></tr>
+      <tr><td><code>use_background</code></td><td class="num">true</td><td>Set <code>false</code> on a moving platform (shape test only, more false positives).</td></tr>
+      <tr><td><code>background_learn_frames</code></td><td class="num">90</td><td>Learning time in frames (90 = 9 s). Longer = steadier background.</td></tr>
+      <tr><td><code>background_voxel</code>, <code>background_min_ratio</code></td><td class="num">0.2 m, 0.6</td><td>Background resolution and occupancy threshold. 0.15 m caused false positives; a low ratio absorbs passers-by.</td></tr>
+      <tr><td><code>ground_seed_fraction</code></td><td class="num">0.15</td><td>RANSAC samples from this lowest fraction of points. Raise if the floor covers most of the view.</td></tr>
+      <tr><td><code>ground_min_inliers</code></td><td class="num">0.03</td><td>Minimum floor share of points before the fit is trusted.</td></tr>
+      <tr><td><code>cluster_eps</code>, <code>min_cluster_points</code></td><td class="num">0.30 m, 12</td><td>DBSCAN neighbour distance and minimum cluster size. Lower the size for people far away; raise <code>eps</code> if a person splits in two.</td></tr>
+      <tr><td><code>min_height</code></td><td class="num">1.0 m</td><td>Lower (e.g. 0.6) for children or seated people.</td></tr>
+      <tr><td><code>max_bottom</code></td><td class="num">0.7 m</td><td>Raise if legs are hidden (lidar low, behind a desk).</td></tr>
+      <tr><td><code>confirm_frames</code>, <code>coast_frames</code>, <code>max_missed_frames</code></td><td class="num">3, 8, 15</td><td>Tracker timing. More confirm frames = fewer false alarms, slower reaction.</td></tr>
+      <tr><td><code>show_rejected</code></td><td class="num">false</td><td>Draw rejected clusters as orange boxes. Turn on while tuning.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Tuning loop</h3>
+  <ol class="steps">
+    <li><div><p>Set <code>show_rejected: true</code>, rebuild, launch, and enable the <em>Foreground</em> display in RViz.</p></div></li>
+    <li><div><p>Walk the area. A person drawn orange means a check failed; the log does not print the reason, so use the replay script below to print it.</p></div></li>
+    <li><div><p>Change one parameter, rebuild, repeat. Record a test walk once and replay it offline so every change is compared on the same data.</p></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ COMMANDS -->
+<section id="commands">
+  <h2><span class="n">09</span>Commands</h2>
+  <p class="sub">Run from <code>ros2_ws/</code> after <code>source install/setup.bash</code>.</p>
+
+  <h3>Run</h3>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>ros2 launch e1r_person_detection e1r_view.launch.py                         <span class="c"># driver + RViz only</span>
+ros2 launch e1r_person_detection e1r_person_detection.launch.py             <span class="c"># driver + detector + RViz</span>
+ros2 launch e1r_person_detection e1r_person_detection.launch.py rviz:=false <span class="c"># headless</span>
+ros2 launch e1r_person_detection e1r_person_detection.launch.py fake:=true   <span class="c"># simulated lidar, no hardware</span>
+ros2 launch e1r_person_detection e1r_person_detection.launch.py detector_config:=/path/to/my.yaml
+
+rviz2 -d install/e1r_person_detection/share/e1r_person_detection/rviz/e1r.rviz   <span class="c"># RViz on its own</span></pre></div>
+
+  <h3>Inspect</h3>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>ros2 topic echo /person_detector/person_present --field data
+ros2 topic echo /person_detector/persons
+ros2 topic echo /rslidar_points --qos-reliability reliable --field width   <span class="c"># points per frame</span>
+ros2 param get /person_detector background_learn_frames
+ros2 param list /person_detector
+
+<span class="c"># re-learn the empty room (after moving the lidar or furniture)</span>
+ros2 service call /person_detector/relearn_background std_srvs/srv/Trigger</pre></div>
+  <div class="note"><p><b><code>ros2 topic hz /rslidar_points</code> under-reports.</b> It always subscribes best-effort, and best-effort DDS drops most 0.5 MB clouds (you may see ~2 Hz). Trust the detector's own log line, <code>10.0 Hz, 23 ms/frame, persons: N</code>, printed every 5 s.</p></div>
+
+  <h3>Record and replay</h3>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre><span class="c"># record raw clouds (~5 MB/s) while the driver runs</span>
+ros2 bag record /rslidar_points -o walk_test
+
+<span class="c"># later, without the lidar: start only the detector (+ RViz), then play the bag</span>
+ros2 run e1r_person_detection person_detector --ros-args \
+    --params-file install/e1r_person_detection/share/e1r_person_detection/config/detector.yaml
+ros2 bag play walk_test</pre></div>
+
+  <h3>Build and test</h3>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>colcon build --packages-select e1r_person_detection          <span class="c"># after editing our code or config</span>
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release         <span class="c"># everything</span>
+cd src/e1r_person_detection &amp;&amp; python3 -m pytest -q test</pre></div>
+
+  <h3>Stop</h3>
+  <p>Press <span class="kbd">Ctrl</span> + <span class="kbd">C</span> in the launch terminal. <code>rslidar_sdk_node</code> ignores <code>SIGTERM</code>, so a plain <code>kill</code> leaves the driver running and a second launch then runs two drivers. To clean up:</p>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>pkill -INT -f "rslidar_sdk_node --ros-args"; pkill -INT -f "person_detector --ros-args"
+ps -eo pid,args | grep -E "rslidar_sdk_node|person_detector|rviz2" | grep -v grep   <span class="c"># should print nothing</span></pre></div>
+</section>
+
+<!-- ============================================================ DEBUG -->
+<section id="debug">
+  <h2><span class="n">10</span>Debugging</h2>
+
+  <h3>Symptom → first check</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Symptom</th><th>Check</th><th>Likely cause / fix</th></tr></thead>
+    <tbody>
+      <tr><td>NIC <code>rx_packets</code> does not grow at all</td><td><code>cat /sys/class/net/IF/speed</code>, box LED</td><td>Physical layer. Link at 100 Mbps (cable or adapter), no power, lidar not woken (KL15).</td></tr>
+      <tr><td>~1 packet/s only</td><td><code>ip -br addr show IF</code></td><td>Those are the lidar's ARP requests. The PC does not own 192.168.1.102: run <code>setup_network.sh</code>.</td></tr>
+      <tr><td>Packets arrive, no <code>/rslidar_points</code></td><td>driver log, <code>check_lidar.py</code></td><td>Another process holds UDP 6699 (old driver still running), or wrong <code>config_path</code>.</td></tr>
+      <tr><td>Cloud at ~2 Hz in RViz</td><td>RViz display QoS</td><td>Set the PointCloud2 display's reliability to <em>Reliable</em> (already set in <code>e1r.rviz</code>).</td></tr>
+      <tr><td>Scene upside down, or ceiling treated as floor</td><td><code>mount_roll_deg</code></td><td>Lidar mounted inverted: set <code>mount_roll_deg: 180</code>.</td></tr>
+      <tr><td>Nobody detected</td><td>Foreground display, <code>show_rejected</code></td><td>Person was standing still during learning (relearn), or a size check fails (see replay below).</td></tr>
+      <tr><td>False boxes on objects</td><td><code>show_rejected</code>, replay</td><td>Object moved after learning (relearn), or tighten the envelope / lower <code>max_range</code>.</td></tr>
+      <tr><td>Config change has no effect</td><td><code>ros2 param get</code></td><td>Not rebuilt: launch reads <code>install/</code>, not <code>src/</code>.</td></tr>
+      <tr><td><code>pcap.h: No such file</code> during build</td><td></td><td><code>sudo apt install libpcap-dev</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Watch the packet counter</h3>
+  <p>The NIC counter is the decisive signal: a live, correctly addressed E1R produces about 3,000 packets per second.</p>
+  <div class="code"><div class="cap"><span>bash</span><button class="copy" type="button">copy</button></div><pre>IF=enp2s0; a=$(cat /sys/class/net/$IF/statistics/rx_packets); sleep 5
+echo "$(( ($(cat /sys/class/net/$IF/statistics/rx_packets) - a) / 5 )) pkt/s"
+sudo tcpdump -i $IF -n -c 20          <span class="c"># see what actually arrives (ARP? UDP 6699?)</span></pre></div>
+
+  <h3>Grab one cloud and check orientation</h3>
+  <p>Saves a cloud to <code>.npy</code> and prints the rate and coordinate ranges. With the lidar upright, x is forward and the floor should sit at negative z (about −sensor height).</p>
+  <div class="code"><div class="cap"><span>grab_cloud.py</span><button class="copy" type="button">copy</button></div><pre><span class="k">import</span> sys, time, numpy <span class="k">as</span> np, rclpy
+<span class="k">from</span> rclpy.qos <span class="k">import</span> QoSProfile, ReliabilityPolicy
+<span class="k">from</span> sensor_msgs.msg <span class="k">import</span> PointCloud2
+<span class="k">from</span> sensor_msgs_py <span class="k">import</span> point_cloud2
+
+rclpy.init(); node = rclpy.create_node(<span class="k">"grab_cloud"</span>)
+stamps, last = [], [None]
+<span class="k">def</span> cb(msg): stamps.append(time.time()); last[0] = msg
+node.create_subscription(PointCloud2, <span class="k">"/rslidar_points"</span>, cb,
+                         QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE))   <span class="c"># RELIABLE!</span>
+<span class="k">while</span> len(stamps) &lt; 30: rclpy.spin_once(node, timeout_sec=0.1)
+xyz = point_cloud2.read_points_numpy(last[0], field_names=(<span class="k">"x"</span>, <span class="k">"y"</span>, <span class="k">"z"</span>))
+print(f<span class="k">"{(len(stamps)-1)/(stamps[-1]-stamps[0]):.1f} Hz, {len(xyz)} points"</span>)
+<span class="k">for</span> i, a <span class="k">in</span> enumerate(<span class="k">"xyz"</span>):
+    print(a, np.percentile(xyz[:, i], [1, 50, 99]).round(2))
+np.save(<span class="k">"cloud.npy"</span>, xyz)</pre></div>
+
+  <h3>Check the floor fit offline</h3>
+  <div class="code"><div class="cap"><span>python · after source install/setup.bash</span><button class="copy" type="button">copy</button></div><pre><span class="k">import</span> numpy <span class="k">as</span> np
+<span class="k">from</span> e1r_person_detection.detector <span class="k">import</span> PersonDetector, DetectorParams
+
+pts = np.load(<span class="k">"cloud.npy"</span>).astype(np.float64)
+<span class="k">for</span> roll <span class="k">in</span> (0.0, 180.0):
+    det = PersonDetector(DetectorParams(use_background=False, mount_roll_deg=roll))
+    fit = det._fit_ground(pts)
+    print(roll, <span class="k">"no floor"</span> <span class="k">if</span> fit <span class="k">is</span> None <span class="k">else</span> f<span class="k">"normal {fit[0].round(3)}, sensor height {fit[1]:.2f} m"</span>)
+<span class="c"># the right mount gives the real height (e.g. 1.20 m); the wrong one finds the ceiling</span></pre></div>
+
+  <h3>Record frames and replay them with reasons</h3>
+  <p>Record a walk once, then replay it through the detector with any parameter changed. Prints every cluster with its pass/fail reason, which the ROS node does not log.</p>
+  <div class="code"><div class="cap"><span>record.py</span><button class="copy" type="button">copy</button></div><pre><span class="c"># python3 record.py 200 walk.npz     (200 frames = 20 s)</span>
+<span class="k">import</span> sys, numpy <span class="k">as</span> np, rclpy
+<span class="k">from</span> rclpy.qos <span class="k">import</span> QoSProfile, ReliabilityPolicy
+<span class="k">from</span> sensor_msgs.msg <span class="k">import</span> PointCloud2
+<span class="k">from</span> sensor_msgs_py <span class="k">import</span> point_cloud2
+
+N, out = int(sys.argv[1]), sys.argv[2]
+rclpy.init(); node = rclpy.create_node(<span class="k">"record_clouds"</span>); clouds = []
+node.create_subscription(PointCloud2, <span class="k">"/rslidar_points"</span>,
+    <span class="k">lambda</span> m: clouds.append(point_cloud2.read_points_numpy(m, field_names=(<span class="k">"x"</span>, <span class="k">"y"</span>, <span class="k">"z"</span>))),
+    QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE))
+<span class="k">while</span> len(clouds) &lt; N: rclpy.spin_once(node, timeout_sec=0.1)
+np.savez_compressed(out, *clouds)</pre></div>
+  <div class="code"><div class="cap"><span>replay.py</span><button class="copy" type="button">copy</button></div><pre><span class="c"># source install/setup.bash, cd src/e1r_person_detection (reads config/detector.yaml), then:
+# python3 replay.py walk.npz min_height=0.8 max_range=15</span>
+<span class="k">import</span> sys, yaml, numpy <span class="k">as</span> np
+<span class="k">from</span> e1r_person_detection.detector <span class="k">import</span> DetectorParams, PersonDetector
+
+z = np.load(sys.argv[1]); clouds = [z[f<span class="k">"arr_{i}"</span>].astype(np.float64) <span class="k">for</span> i <span class="k">in</span> range(len(z.files))]
+cfg = yaml.safe_load(open(<span class="k">"config/detector.yaml"</span>))[<span class="k">"person_detector"</span>][<span class="k">"ros__parameters"</span>]
+kw = {k: v <span class="k">for</span> k, v <span class="k">in</span> cfg.items() <span class="k">if</span> k <span class="k">in</span> DetectorParams.__dataclass_fields__}
+<span class="k">for</span> arg <span class="k">in</span> sys.argv[2:]:                                  <span class="c"># overrides: name=value</span>
+    k, v = arg.split(<span class="k">"="</span>); kw[k] = type(getattr(DetectorParams(), k))(eval(v))
+det = PersonDetector(DetectorParams(**kw))
+<span class="k">for</span> i, c <span class="k">in</span> enumerate(clouds):
+    res = det.process(c)
+    <span class="k">if</span> res.learning: <span class="k">continue</span>
+    <span class="k">for</span> d <span class="k">in</span> res.detections:
+        print(f<span class="k">"frame {i:3d}  {'PERSON' if d.is_person else 'reject'}  r={d.range:4.1f} m  "</span>
+              f<span class="k">"h={d.size[2]:.2f}  n={d.num_points:3d}  {d.reason}"</span>)</pre></div>
+  <div class="code"><div class="cap"><span>example output</span><button class="copy" type="button">copy</button></div><pre><span class="c">$ python3 replay.py walk.npz</span>
+frame  99  PERSON  r=11.7 m  h=1.57  n= 19  ok
+frame 152  PERSON  r= 9.6 m  h=1.63  n= 38  ok
+frame 182  PERSON  r= 8.7 m  h=1.65  n= 82  ok
+<span class="c">$ python3 replay.py walk.npz min_height=1.7      # what if heads had to be above 1.7 m?</span>
+frame  99  reject  r=11.7 m  h=1.57  n= 19  fail: top 1.57m</pre></div>
+</section>
+
+<!-- ============================================================ PERFORMANCE -->
+<section id="performance">
+  <h2><span class="n">11</span>Performance</h2>
+  <p class="sub">Measured live for 30 s on a laptop with an AMD Ryzen 7 7735HS (8 cores / 16 threads) and 13 GB RAM, lidar at 10 Hz with ~25k points per frame.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Process</th><th>CPU (of one core)</th><th>RAM</th><th>GPU</th></tr></thead>
+    <tbody>
+      <tr><td><code>rslidar_sdk_node</code></td><td class="num">5 %</td><td class="num">40 MB</td><td>none</td></tr>
+      <tr><td><code>person_detector</code></td><td class="num">26 %</td><td class="num">175 MB</td><td>none</td></tr>
+      <tr><td>RViz (optional)</td><td class="num">9 %</td><td class="num">200 MB</td><td>~5 % of integrated GPU</td></tr>
+      <tr><td><strong>Total, headless</strong></td><td class="num"><strong>~31 %</strong></td><td class="num"><strong>~215 MB</strong></td><td><strong>none</strong></td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li>A frame takes ~23 ms of the 100 ms budget. The algorithm itself is ~14 ms; the rest is converting the ROS message and publishing.</li>
+    <li>The launch file pins the detector to one BLAS thread (<code>OMP_NUM_THREADS=1</code>). With numpy's default thread pool the same work used 52 % of a core.</li>
+    <li>Any 2-core x86 machine with 2 GB RAM is enough without RViz. ARM boards (Raspberry Pi 5, Jetson) should work but are untested; expect 2–4× slower.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ FACTS -->
+<section id="facts">
+  <h2><span class="n">12</span>Known pitfalls</h2>
+  <div class="grid2">
+    <div class="card"><h4>Gigabit or nothing</h4><p>The interface box RJ45 does not fall back to 100 Mbps. Two USB adapters at 100 Mbps received zero packets; a gigabit port worked at once.</p></div>
+    <div class="card"><h4>The PC must own 192.168.1.102</h4><p>The lidar sends unicast and waits for an ARP reply. Until the address is set you only see ~1 ARP packet per second.</p></div>
+    <div class="card"><h4>Subscribe RELIABLE</h4><p>A cloud is ~0.5 MB. Best-effort DDS dropped ~80 % of frames. RViz displays and the detector use Reliable.</p></div>
+    <div class="card"><h4>Fast PointCloud2 in Python</h4><p>Assign <code>msg.data = array.array('B', buf)</code>, never raw <code>bytes</code> (100 ms vs 0.1 ms per cloud in Humble).</p></div>
+    <div class="card"><h4>Mounting decides "up"</h4><p>An inverted lidar without <code>mount_roll_deg: 180</code> takes the ceiling as the floor and finds nobody.</p></div>
+    <div class="card"><h4>Floor can be tiny</h4><p>With a table blocking the near view, the floor was 5 % of points. RANSAC therefore samples from the lowest points.</p></div>
+    <div class="card"><h4>Stand still = background</h4><p>Anyone motionless during the 9 s learning period is learned as background. Relearn once they leave.</p></div>
+    <div class="card"><h4>Driver ignores SIGTERM</h4><p>Stop with <span class="kbd">Ctrl</span>+<span class="kbd">C</span> / SIGINT, or two drivers end up running.</p></div>
+  </div>
+  <p>Next steps: tune <code>detector.yaml</code> for the deployment room. If geometric false positives remain a problem, a learned detector such as PointPillars is the upgrade path (that one would need a GPU).</p>
+</section>
+
+<footer>E1R Person Detection · ROS 2 Humble · figures rendered from a real E1R recording on 10 Oct 2026 · source: <code>docs/index.html</code> in the repository</footer>
+</main>
+</div>
+
+<script>
+document.querySelectorAll(".code .copy").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var pre = btn.closest(".code").querySelector("pre");
+    var text = pre.innerText;
+    function done(msg) { btn.textContent = msg; setTimeout(function () { btn.textContent = "copy"; }, 1400); }
+    try {
+      navigator.clipboard.writeText(text).then(function () { done("copied"); }, function () { selectPre(); });
+    } catch (e) { selectPre(); }
+    function selectPre() {
+      var r = document.createRange(); r.selectNodeContents(pre);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); done("selected");
+    }
+  });
+});
+</script>
