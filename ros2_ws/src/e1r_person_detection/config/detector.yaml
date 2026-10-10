@@ -1,0 +1,25 @@
+# Person detector parameters (all optional; defaults live in detector.py)
+person_detector:
+  ros__parameters:
+    input_topic: /rslidar_points
+    show_rejected: false          # true: draw non-person clusters as orange boxes (useful for tuning)
+
+    max_range: 20.0
+    voxel_size: 0.06
+
+    # Static background: learned from the first frames. Keep the FOV empty at startup,
+    # or call:  ros2 service call /person_detector/relearn_background std_srvs/srv/Trigger
+    use_background: true
+    background_learn_frames: 30
+
+    # Human size envelope (metres, measured from the detected floor)
+    min_height: 1.0
+    max_height: 2.2
+    max_bottom: 0.7
+    max_footprint_major: 1.2
+    max_footprint_minor: 0.9
+
+    # Tracking
+    confirm_frames: 3             # consecutive detections before a person is reported
+    max_missed_frames: 15         # frames before a lost track is deleted (1.5 s)
+    coast_frames: 8               # keep reporting a person through short occlusions (0.8 s)

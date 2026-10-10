@@ -1,0 +1,85 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 30
+      Color: 100; 100; 100
+    - Class: rviz_default_plugins/Axes
+      Name: Lidar axes
+      Enabled: true
+      Length: 0.5
+      Radius: 0.03
+    - Class: rviz_default_plugins/PointCloud2
+      Name: E1R points
+      Enabled: true
+      Topic:
+        Value: /rslidar_points
+        Reliability Policy: Reliable
+        Depth: 5
+        History Policy: Keep Last
+        Durability Policy: Volatile
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Use rainbow: true
+      Autocompute Intensity Bounds: true
+      Decay Time: 0
+      Queue Size: 10
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Foreground (after ground/background removal)
+      Enabled: false
+      Topic:
+        Value: /person_detector/foreground
+        Reliability Policy: Reliable
+        Depth: 5
+        History Policy: Keep Last
+        Durability Policy: Volatile
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 255; 60; 60
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Persons
+      Enabled: true
+      Topic:
+        Value: /person_detector/markers
+        Reliability Policy: Reliable
+        Depth: 5
+        History Policy: Keep Last
+        Durability Policy: Volatile
+      Namespaces:
+        {}
+  Global Options:
+    Background Color: 30; 30; 35
+    Fixed Frame: rslidar
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/PublishPoint
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 14
+      Focal Point:
+        X: 5
+        Y: 0
+        Z: 0
+      Pitch: 0.55
+      Yaw: 3.14
+      Name: Current View
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Height: 900
+  Width: 1500
+  Displays:
+    collapsed: false
