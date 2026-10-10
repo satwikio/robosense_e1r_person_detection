@@ -21,6 +21,21 @@ def test_ground_plane_recovers_mounting():
     assert abs(np.degrees(np.arccos(n[2])) - 10.0) < 1.5
 
 
+def test_upside_down_mount():
+    # lidar rolled 180 deg (as on the bench): floor is along lidar +z
+    rng = np.random.default_rng(6)
+    flip = np.array([1.0, -1.0, -1.0])
+    det = PersonDetector(DetectorParams(mount_roll_deg=180.0))
+    for _ in range(det.p.background_learn_frames):
+        det.process(render([], rng=rng)[0] * flip)
+    n, d = det.plane
+    assert abs(d - 1.2) < 0.05 and n[2] < -0.9
+    res = det.process(render([(4.0, 1.0, 0.0, 1.75)], rng=rng)[0] * flip)
+    persons = [d for d in res.detections if d.is_person]
+    assert len(persons) == 1, [d.reason for d in res.detections]
+    assert np.linalg.norm(persons[0].center[:2] - [4.0, -1.0]) < 0.3
+
+
 def test_empty_scene_has_no_person():
     rng = np.random.default_rng(1)
     det = _learned_detector(rng)

@@ -21,10 +21,17 @@ class DetectorParams:
     max_range: float = 20.0
     voxel_size: float = 0.06
 
+    # mounting: rotation of the lidar about its x (roll) / y (pitch) axis relative to upright (z up).
+    # Only used to know which way is "up" when searching for the floor; e.g. upside down: roll 180.
+    mount_roll_deg: float = 0.0
+    mount_pitch_deg: float = 0.0
+
     # ground plane
     ground_ransac_iters: int = 120
     ground_dist_thresh: float = 0.08      # inlier distance to plane
-    ground_max_tilt_deg: float = 35.0     # max angle between plane normal and lidar +z
+    ground_max_tilt_deg: float = 35.0     # max angle between floor normal and the mounting "up"
+    ground_seed_fraction: float = 0.15    # RANSAC samples from this lowest fraction of points (floor is lowest)
+    ground_min_inliers: float = 0.03      # min floor inlier fraction (floor may be mostly occluded)
     ground_clearance: float = 0.12        # points below this height are treated as ground
     fallback_sensor_height: float = 1.0   # used if no floor is visible
     fix_ground_after_learning: bool = True
@@ -96,6 +103,11 @@ class PersonDetector:
         self._bg_keys = None         # sorted packed keys of background voxels
 
     # ------------------------------------------------------------------ ground
+    def _up(self):
+        """World "up" in the lidar frame implied by mount_roll_deg / mount_pitch_deg."""
+        r, q = np.deg2rad(self.p.mount_roll_deg), np.deg2rad(self.p.mount_pitch_deg)
+        return np.array([-np.sin(q), np.sin(r) * np.cos(q), np.cos(r) * np.cos(q)])
+
     def _fit_ground(self, pts):
         p = self.p
         cand = pts
@@ -104,17 +116,23 @@ class PersonDetector:
         if len(cand) < 50:
             return None
         cos_tilt = np.cos(np.deg2rad(p.ground_max_tilt_deg))
+        up = self._up()
+        # draw samples from the lowest points: the floor may be a small fraction of the whole cloud
+        hu = cand @ up
+        seeds = cand[hu <= np.quantile(hu, p.ground_seed_fraction)]
+        if len(seeds) < 3:
+            seeds = cand
         best_n, best_d, best_inl = None, None, 0
         for _ in range(p.ground_ransac_iters):
-            s = cand[self.rng.choice(len(cand), 3, replace=False)]
+            s = seeds[self.rng.choice(len(seeds), 3, replace=False)]
             n = np.cross(s[1] - s[0], s[2] - s[0])
             norm = np.linalg.norm(n)
             if norm < 1e-6:
                 continue
             n /= norm
-            if n[2] < 0:
+            if n @ up < 0:
                 n = -n
-            if n[2] < cos_tilt:
+            if n @ up < cos_tilt:
                 continue
             d = -n @ s[0]
             # floor must be the lowest large plane: almost nothing should lie far below it
@@ -124,14 +142,14 @@ class PersonDetector:
             score = inl - 3 * below
             if score > best_inl:
                 best_n, best_d, best_inl = n, d, score
-        if best_n is None or best_inl < 0.05 * len(cand):
+        if best_n is None or best_inl < p.ground_min_inliers * len(cand):
             return None
         # least-squares refine on inliers
         h = pts @ best_n + best_d
         inl = pts[np.abs(h) < p.ground_dist_thresh]
         c = inl.mean(axis=0)
         _, _, vt = np.linalg.svd(inl - c, full_matrices=False)
-        n = vt[2] if vt[2][2] > 0 else -vt[2]
+        n = vt[2] if vt[2] @ up > 0 else -vt[2]
         return n, -n @ c
 
     def _set_plane(self, n, d):
@@ -177,7 +195,7 @@ class PersonDetector:
             if fit is not None:
                 self._set_plane(*fit)
             elif self.plane is None:
-                self._set_plane(np.array([0.0, 0.0, 1.0]), p.fallback_sensor_height)
+                self._set_plane(self._up(), p.fallback_sensor_height)
         res.ground_ok = self.plane is not None
         self.frames_seen += 1
 

@@ -130,8 +130,9 @@ class PersonDetectorNode(Node):
             txt.ns = "label"
             txt.id = tr.id
             txt.type = Marker.TEXT_VIEW_FACING
-            txt.pose.position.x, txt.pose.position.y, txt.pose.position.z = map(float, d.center)
-            txt.pose.position.z += float(d.size[2]) / 2 + 0.3
+            # above the head along the floor normal (the lidar may be mounted tilted or upside down)
+            label = d.center + self.det.plane[0] * (d.size[2] / 2 + 0.3)
+            txt.pose.position.x, txt.pose.position.y, txt.pose.position.z = map(float, label)
             txt.pose.orientation.w = 1.0
             txt.scale.z = 0.3
             txt.color.r = txt.color.g = txt.color.b = txt.color.a = 1.0

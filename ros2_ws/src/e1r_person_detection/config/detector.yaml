@@ -4,13 +4,17 @@ person_detector:
     input_topic: /rslidar_points
     show_rejected: false          # true: draw non-person clusters as orange boxes (useful for tuning)
 
+    # Mounting (which way is up). Upside down = roll 180. The floor is then found automatically.
+    mount_roll_deg: 0.0
+    mount_pitch_deg: 0.0
+
     max_range: 20.0
     voxel_size: 0.06
 
     # Static background: learned from the first frames. Keep the FOV empty at startup,
     # or call:  ros2 service call /person_detector/relearn_background std_srvs/srv/Trigger
     use_background: true
-    background_learn_frames: 30
+    background_learn_frames: 90
 
     # Human size envelope (metres, measured from the detected floor)
     min_height: 1.0

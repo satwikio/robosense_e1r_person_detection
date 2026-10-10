@@ -25,8 +25,10 @@ def generate_launch_description():
              parameters=[{"config_path": LaunchConfiguration("lidar_config")}], condition=UnlessCondition(fake)),
         Node(package="e1r_person_detection", executable="fake_lidar", name="fake_e1r", output="screen",
              condition=IfCondition(fake)),
+        # single-threaded BLAS: the arrays are small, so extra threads only add spin overhead (~10% of a core)
         Node(package="e1r_person_detection", executable="person_detector", name="person_detector", output="screen",
-             parameters=[LaunchConfiguration("detector_config")]),
+             parameters=[LaunchConfiguration("detector_config")],
+             additional_env={"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}),
         Node(package="rviz2", executable="rviz2", name="rviz2",
              arguments=["-d", os.path.join(share, "rviz", "e1r.rviz")], condition=IfCondition(LaunchConfiguration("rviz"))),
     ])

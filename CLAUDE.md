@@ -38,10 +38,18 @@ ros2 launch e1r_person_detection e1r_view.launch.py                # real lidar,
 - `sensor_msgs_py.point_cloud2.create_cloud` is slow for big clouds; build `PointCloud2` manually (see fake_lidar_node).
 - Background model: a 0.2 m voxel counts as background if occupied in ≥60% of learning frames. 0.15 m voxels
   caused false positives; a low ratio absorbed people walking through during learning. Anyone *standing still*
-  during the first ~3 s becomes background (by design; use the relearn service).
+  during learning (`background_learn_frames: 90` = first ~9 s) becomes background (by design; use the relearn service).
 - A person passing a learned-background object (pole) loses points for ~0.7 s; `coast_frames: 8` bridges it.
+- Mounting: `mount_roll_deg`/`mount_pitch_deg` in detector.yaml tell the floor search which way is up
+  (current mount: **upright, roll 0, ~1.25 m above floor**, floor tilt ~4°; upside down would be roll 180,
+  otherwise the ceiling wins). Outputs/markers stay in the `rslidar` frame.
+- Real floor can be only ~5% of points (table occludes the near FOV, grazing angles, ~5 cm noise), so RANSAC
+  seeds from the lowest `ground_seed_fraction` of points; uniform sampling never hit the floor.
 - Detector assumes a **static** lidar. On a moving platform set `use_background: false` (shape test only).
-- Performance: ~35 ms/frame at 10 Hz on an Intel Core Ultra laptop.
+- Performance: ~35 ms/frame at 10 Hz on an Intel Core Ultra laptop. Measured live on Ryzen 7 7735HS: driver 5%
+  of one core / 40 MB, detector 26% / 175 MB, RViz 9% / 200 MB + ~5% iGPU. No GPU used by the detector.
+  The launch pins the detector to 1 BLAS thread; default multithreaded numpy doubled its CPU (52%).
+- `rslidar_sdk_node` ignores SIGTERM: stop a launch with SIGINT, or old drivers keep running alongside new ones.
 - The rslidar_sdk builds fine when libpcap-dev is installed; `-DDISABLE_PCAP_PARSE=ON` does NOT propagate to
   the SDK node target (link errors), so just install libpcap-dev.
 
@@ -58,19 +66,20 @@ Manual: https://1292444914-files.gitbook.io/~/files/v0/b/gitbook-x-prod.appspot.
 
 ## Status (2026-10-10)
 
-Software is complete and tested against the synthetic lidar. **No packet has been received from the real E1R
-yet.** On the first laptop: two different USB ethernet adapters both linked at **100 Mbps** and received
-0 packets (not even ARP); ping 192.168.1.200 and a full 192.168.1.0/24 sweep got no replies. Suspected cause:
-the link negotiates 100 Mbps but the interface box is gigabit-only, so check the cable (Cat5e/6, all 4 pairs)
-and confirm `/sys/class/net/<iface>/speed` reads 1000. Also check: box LED, supply 9–16 V, lidar plug seated,
-lidar actually woken. Setup is being moved to another laptop.
+Software is complete and tested against the synthetic lidar. **Second laptop: E1R data is arriving.**
+`enp2s0` links at 1000 Mbps; after `scripts/setup_network.sh enp2s0` (192.168.1.102/16) check_lidar.py
+shows 2880 MSOP pkt/s + 50 DIFOP pkt/s from 192.168.1.200, ping OK. (The first laptop's USB adapters only
+negotiated 100 Mbps and got nothing, which confirms the gigabit-only box was the problem.) Python deps here:
+numpy 1.26 / scipy 1.13 / scikit-learn 1.5 in `~/.local` (pip --user, keep numpy<2 for ROS Humble).
+Full pipeline runs live: 10 Hz, ~25k pts/frame, detector ~20-25 ms/frame, floor found. Detects a person
+walking in the room (7-12 m) reliably. Learning was verified to suppress all output for the full 90 frames.
 
-When debugging connectivity: the NIC `rx_packets` counter is the decisive signal. A live E1R produces
-thousands of packets/s regardless of IP config, so 0 means a physical/link problem, not an IP problem.
+When debugging connectivity: the NIC `rx_packets` counter is the decisive signal. The E1R streams
+*unicast* to 192.168.1.102, so until the host owns that IP and answers ARP you only see its occasional
+ARP requests (~1 pkt/s, observed); with the IP set it is thousands of pkt/s. 0 packets at all = physical/link.
 `tcpdump` needs sudo; ask the user to run it with `! sudo tcpdump -i <iface> -n -c 20` if needed.
 
 ## Next steps
 
-1. Get packets flowing (above), run `e1r_view.launch.py`, check orientation (x forward, z up) in RViz.
-2. Tune `config/detector.yaml` on real data (`show_rejected: true` shows rejected clusters).
-3. Possible upgrades: learned detector (e.g. PointPillars) if geometric false positives are a problem.
+1. Tune `config/detector.yaml` for the deployment environment (`show_rejected: true` to see rejected clusters).
+2. Possible upgrades: learned detector (e.g. PointPillars) if geometric false positives are a problem.
